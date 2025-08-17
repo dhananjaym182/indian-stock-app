@@ -1,0 +1,272 @@
+'use client';
+
+import React, { useEffect, useRef, useState } from 'react';
+import { 
+  createChart, 
+  IChartApi, 
+  ISeriesApi, 
+  CandlestickData, 
+  ColorType, 
+  CandlestickSeries, 
+  HistogramSeries 
+} from 'lightweight-charts';
+
+interface OHLCVData {
+  time: string; // Format: 'YYYY-MM-DD'
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
+}
+
+interface LightweightCandleStickChartProps {
+  data: OHLCVData[];
+  symbol: string;
+  width?: number;
+  height?: number;
+  theme?: 'light' | 'dark';
+}
+
+const LightweightCandleStickChart: React.FC<LightweightCandleStickChartProps> = ({
+  data,
+  symbol,
+  width = 800,
+  height = 500,
+  theme = 'dark'
+}) => {
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    if (!chartContainerRef.current) return;
+
+    // Clean up previous chart
+    if (chartRef.current) {
+      chartRef.current.remove();
+    }
+
+    // Create chart with theme-based styling
+    const chart = createChart(chartContainerRef.current, {
+      width: width,
+      height: height,
+      layout: {
+        background: { 
+          type: ColorType.Solid, 
+          color: theme === 'dark' ? '#1e1e1e' : '#ffffff' 
+        },
+        textColor: theme === 'dark' ? '#d1d4dc' : '#191919',
+        fontSize: 12,
+        fontFamily: 'Trebuchet MS, sans-serif',
+      },
+      grid: {
+        vertLines: { 
+          color: theme === 'dark' ? '#2b2b43' : '#e1e3e6' 
+        },
+        horzLines: { 
+          color: theme === 'dark' ? '#2b2b43' : '#e1e3e6' 
+        },
+      },
+      crosshair: {
+        mode: 1, // CrosshairMode.Normal
+      },
+      rightPriceScale: {
+        borderColor: theme === 'dark' ? '#485c7c' : '#d6dcde',
+        scaleMargins: {
+          top: 0.1,
+          bottom: data.some(item => item.volume) ? 0.4 : 0.1,
+        },
+      },
+      timeScale: {
+        borderColor: theme === 'dark' ? '#485c7c' : '#d6dcde',
+        timeVisible: true,
+        secondsVisible: false,
+      },
+    });
+
+    chartRef.current = chart;
+
+    // ✅ FIXED: Use addSeries with CandlestickSeries (v5 API)
+    const candlestickSeries = chart.addSeries(CandlestickSeries, {
+      upColor: '#26a69a',
+      downColor: '#ef5350',
+      borderVisible: false,
+      wickUpColor: '#26a69a',
+      wickDownColor: '#ef5350',
+      priceFormat: {
+        type: 'price',
+        precision: 2,
+        minMove: 0.01,
+      },
+    });
+
+    candleSeriesRef.current = candlestickSeries;
+
+    // Set candlestick data
+    const candleData: CandlestickData[] = data.map(item => ({
+      time: item.time,
+      open: item.open,
+      high: item.high,
+      low: item.low,
+      close: item.close,
+    }));
+
+    candlestickSeries.setData(candleData);
+
+    // Add volume series if volume data exists
+    const hasVolume = data.some(item => item.volume !== undefined);
+    if (hasVolume) {
+      // ✅ FIXED: Use addSeries with HistogramSeries (v5 API)
+      const volumeSeries = chart.addSeries(HistogramSeries, {
+        color: '#26a69a',
+        priceFormat: {
+          type: 'volume',
+        },
+        priceScaleId: '',
+      });
+
+      // Set scale margins for the volume series price scale
+      volumeSeries.priceScale().applyOptions({
+        scaleMargins: {
+          top: 0.7, // Volume takes bottom 30%
+          bottom: 0,
+        },
+      });
+
+      volumeSeriesRef.current = volumeSeries;
+
+      // Set volume data
+      const volumeData = data
+        .filter(item => item.volume !== undefined)
+        .map(item => ({
+          time: item.time,
+          value: item.volume!,
+          color: item.close > item.open ? '#26a69a80' : '#ef535080',
+        }));
+
+      volumeSeries.setData(volumeData);
+    }
+
+    // Fit content to show all data
+    chart.timeScale().fitContent();
+    setIsLoading(false);
+
+    // Handle resize
+    const handleResize = () => {
+      if (chartRef.current && chartContainerRef.current) {
+        chartRef.current.applyOptions({ 
+          width: chartContainerRef.current.clientWidth 
+        });
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+
+    // Cleanup
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      if (chartRef.current) {
+        chartRef.current.remove();
+        chartRef.current = null;
+      }
+    };
+  }, [data, width, height, theme]);
+
+  if (isLoading) {
+    return (
+      <div 
+        style={{
+          width: `${width}px`,
+          height: `${height}px`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: theme === 'dark' ? '#1e1e1e' : '#ffffff',
+          color: theme === 'dark' ? '#d1d4dc' : '#191919',
+          border: `1px solid ${theme === 'dark' ? '#2b2b43' : '#e1e3e6'}`,
+          borderRadius: '8px'
+        }}
+      >
+        Loading {symbol} chart...
+      </div>
+    );
+  }
+
+  return (
+    <div className="lightweight-chart-container">
+      <div className="chart-header">
+        <h3 className="chart-title">{symbol}</h3>
+        <div className="chart-controls">
+          <button className="btn-timeframe active">1D</button>
+          <button className="btn-timeframe">1W</button>
+          <button className="btn-timeframe">1M</button>
+          <button className="btn-timeframe">3M</button>
+          <button className="btn-timeframe">1Y</button>
+        </div>
+      </div>
+      
+      <div 
+        ref={chartContainerRef}
+        style={{ 
+          position: 'relative',
+          width: `${width}px`, 
+          height: `${height}px`,
+        }}
+      />
+      
+      <style jsx>{`
+        .lightweight-chart-container {
+          border: 1px solid ${theme === 'dark' ? '#2b2b43' : '#e1e3e6'};
+          border-radius: 8px;
+          overflow: hidden;
+          background: ${theme === 'dark' ? '#1e1e1e' : '#ffffff'};
+          font-family: 'Trebuchet MS', sans-serif;
+        }
+        
+        .chart-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 16px;
+          border-bottom: 1px solid ${theme === 'dark' ? '#2b2b43' : '#e1e3e6'};
+          background: ${theme === 'dark' ? '#2d2d2d' : '#f8f9fa'};
+        }
+        
+        .chart-title {
+          margin: 0;
+          font-size: 18px;
+          font-weight: 600;
+          color: ${theme === 'dark' ? '#d1d4dc' : '#191919'};
+        }
+        
+        .chart-controls {
+          display: flex;
+          gap: 8px;
+        }
+        
+        .btn-timeframe {
+          padding: 6px 12px;
+          border: 1px solid ${theme === 'dark' ? '#485c7c' : '#d6dcde'};
+          border-radius: 4px;
+          background: ${theme === 'dark' ? '#2b2b43' : '#ffffff'};
+          color: ${theme === 'dark' ? '#d1d4dc' : '#191919'};
+          cursor: pointer;
+          transition: all 0.2s;
+          font-size: 12px;
+        }
+        
+        .btn-timeframe:hover,
+        .btn-timeframe.active {
+          background: #2962ff;
+          color: white;
+          border-color: #2962ff;
+        }
+      `}</style>
+    </div>
+  );
+};
+
+export default LightweightCandleStickChart;

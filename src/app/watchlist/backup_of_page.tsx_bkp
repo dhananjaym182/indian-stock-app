@@ -1,0 +1,317 @@
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import useSWR from 'swr';
+import { DashboardLayout } from '@/components/layout/DashboardLayout';
+import { StockCard } from '@/components/stock/StockCard';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Stock } from '@/lib/types/stock';
+import { formatPercentage } from '@/lib/utils';
+import { Star, TrendingUp, TrendingDown, Plus, Trash2, Download } from 'lucide-react';
+
+const fetcher = async (symbols: string[]) => {
+  if (symbols.length === 0) return [];
+  
+  const promises = symbols.map(symbol => 
+    fetch(`/api/stocks/${symbol}/quote`).then(res => res.json())
+  );
+  const results = await Promise.allSettled(promises);
+  return results
+    .filter((result): result is PromiseFulfilledResult<any> => result.status === 'fulfilled')
+    .map(result => result.value.stock)
+    .filter(Boolean);
+};
+
+export default function WatchlistPage() {
+  const [watchlist, setWatchlist] = useState<string[]>([]);
+  const [selectedStocks, setSelectedStocks] = useState<string[]>([]);
+
+  useEffect(() => {
+    const savedWatchlist = localStorage.getItem('stockWatchlist');
+    if (savedWatchlist) {
+      setWatchlist(JSON.parse(savedWatchlist));
+    }
+  }, []);
+
+  const { data: stocks, error, mutate, isLoading } = useSWR(
+    watchlist.length > 0 ? watchlist : null,
+    fetcher,
+    {
+      refreshInterval: 30000,
+      revalidateOnFocus: true,
+    }
+  );
+
+  const handleStockSelect = (symbol: string) => {
+    window.location.href = `/stocks/${symbol}`;
+  };
+
+  const removeFromWatchlist = (symbol: string) => {
+    const newWatchlist = watchlist.filter(s => s !== symbol);
+    setWatchlist(newWatchlist);
+    localStorage.setItem('stockWatchlist', JSON.stringify(newWatchlist));
+    mutate();
+  };
+
+  const removeSelectedStocks = () => {
+    const newWatchlist = watchlist.filter(s => !selectedStocks.includes(s));
+    setWatchlist(newWatchlist);
+    localStorage.setItem('stockWatchlist', JSON.stringify(newWatchlist));
+    setSelectedStocks([]);
+    mutate();
+  };
+
+  const toggleStockSelection = (symbol: string) => {
+    setSelectedStocks(prev => 
+      prev.includes(symbol) 
+        ? prev.filter(s => s !== symbol)
+        : [...prev, symbol]
+    );
+  };
+
+  const selectAllStocks = () => {
+    setSelectedStocks(watchlist);
+  };
+
+  const clearSelection = () => {
+    setSelectedStocks([]);
+  };
+
+  const exportWatchlist = () => {
+    if (!stocks) return;
+    
+    const csvContent = [
+      ['Symbol', 'Name', 'Price', 'Change', 'Change %', 'Volume'].join(','),
+      ...stocks.map((stock: Stock) => [
+        stock.symbol,
+        `"${stock.name}"`,
+        stock.currentPrice,
+        stock.change,
+        stock.changePercent,
+        stock.volume
+      ].join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `watchlist-${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+  };
+
+  // Calculate portfolio stats
+  const portfolioStats = React.useMemo(() => {
+    if (!stocks || stocks.length === 0) {
+      return { totalValue: 0, totalChange: 0, totalChangePercent: 0, gainers: 0, losers: 0 };
+    }
+
+    const totalChange = stocks.reduce((sum: number, stock: Stock) => sum + stock.change, 0);
+    const totalValue = stocks.reduce((sum: number, stock: Stock) => sum + stock.currentPrice, 0);
+    const totalChangePercent = totalValue > 0 ? (totalChange / (totalValue - totalChange)) * 100 : 0;
+    const gainers = stocks.filter((stock: Stock) => stock.change > 0).length;
+    const losers = stocks.filter((stock: Stock) => stock.change < 0).length;
+
+    return { totalValue, totalChange, totalChangePercent, gainers, losers };
+  }, [stocks]);
+
+  if (watchlist.length === 0) {
+    return (
+      <DashboardLayout onStockSelect={handleStockSelect}>
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <h1 className="text-3xl font-bold">My Watchlist</h1>
+          </div>
+
+          <Card>
+            <CardContent className="p-12 text-center">
+              <Star className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold mb-2">Your watchlist is empty</h3>
+              <p className="text-gray-600 mb-6">
+                Start adding stocks to your watchlist to track your favorite investments.
+              </p>
+              <Button onClick={() => window.location.href = '/'}>
+                <Plus className="h-4 w-4 mr-2" />
+                Browse Stocks
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  return (
+    <DashboardLayout onStockSelect={handleStockSelect}>
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold">My Watchlist</h1>
+            <p className="text-gray-600 mt-1">
+              Track your favorite stocks and monitor performance
+            </p>
+          </div>
+          
+          <div className="flex items-center gap-3">
+            {selectedStocks.length > 0 && (
+              <Button
+                onClick={removeSelectedStocks}
+                variant="destructive"
+                size="sm"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Remove Selected ({selectedStocks.length})
+              </Button>
+            )}
+            <Button onClick={exportWatchlist} variant="outline" size="sm">
+              <Download className="h-4 w-4 mr-2" />
+              Export
+            </Button>
+          </div>
+        </div>
+
+        {/* Portfolio Summary */}
+        {stocks && stocks.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-600">Total Stocks</p>
+                    <p className="text-2xl font-bold">{stocks.length}</p>
+                  </div>
+                  <Star className="h-8 w-8 text-blue-500" />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-600">Gainers</p>
+                    <p className="text-2xl font-bold text-green-600">{portfolioStats.gainers}</p>
+                  </div>
+                  <TrendingUp className="h-8 w-8 text-green-500" />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-600">Losers</p>
+                    <p className="text-2xl font-bold text-red-600">{portfolioStats.losers}</p>
+                  </div>
+                  <TrendingDown className="h-8 w-8 text-red-500" />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-600">Avg Change</p>
+                    <p className={`text-2xl font-bold ${portfolioStats.totalChangePercent >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {formatPercentage(portfolioStats.totalChangePercent)}
+                    </p>
+                  </div>
+                  <div className={`p-2 rounded-full ${portfolioStats.totalChangePercent >= 0 ? 'bg-green-100' : 'bg-red-100'}`}>
+                    {portfolioStats.totalChangePercent >= 0 ? 
+                      <TrendingUp className="h-6 w-6 text-green-600" /> : 
+                      <TrendingDown className="h-6 w-6 text-red-600" />
+                    }
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Selection Controls */}
+        {stocks && stocks.length > 0 && (
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <Button
+                    onClick={selectAllStocks}
+                    variant="outline"
+                    size="sm"
+                  >
+                    Select All
+                  </Button>
+                  {selectedStocks.length > 0 && (
+                    <Button
+                      onClick={clearSelection}
+                      variant="outline"
+                      size="sm"
+                    >
+                      Clear Selection
+                    </Button>
+                  )}
+                </div>
+                <div className="text-sm text-gray-500">
+                  {selectedStocks.length} of {stocks.length} selected
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Stocks Grid */}
+        {isLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {[1, 2, 3, 4].map((i) => (
+              <Card key={i} className="animate-pulse">
+                <CardContent className="p-6">
+                  <div className="space-y-4">
+                    <div className="h-6 bg-gray-200 rounded w-3/4"></div>
+                    <div className="h-8 bg-gray-200 rounded w-1/2"></div>
+                    <div className="h-4 bg-gray-200 rounded w-full"></div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        ) : error ? (
+          <Card>
+            <CardContent className="p-12 text-center">
+              <p className="text-red-600 mb-4">Failed to load watchlist stocks</p>
+              <Button onClick={() => mutate()} variant="outline">
+                Retry
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {stocks?.map((stock: Stock) => (
+              <div
+                key={stock.symbol}
+                className={`relative ${selectedStocks.includes(stock.symbol) ? 'ring-2 ring-blue-500 rounded-lg' : ''}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedStocks.includes(stock.symbol)}
+                  onChange={() => toggleStockSelection(stock.symbol)}
+                  className="absolute top-2 left-2 z-10"
+                />
+                <StockCard
+                  stock={stock}
+                  onSelect={handleStockSelect}
+                  onAddToWatchlist={removeFromWatchlist}
+                  isInWatchlist={true}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </DashboardLayout>
+  );
+}

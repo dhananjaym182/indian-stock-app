@@ -1,0 +1,189 @@
+'use client';
+
+import React, { useEffect, useRef, useState } from 'react';
+import { 
+  createChart, 
+  IChartApi, 
+  ColorType, 
+  CandlestickSeries, 
+  HistogramSeries 
+} from 'lightweight-charts';
+
+interface OHLCVData {
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
+}
+
+interface CandleStickChartProps {
+  data: OHLCVData[];
+  symbol: string;
+  width?: number;
+  height?: number;
+  theme?: 'light' | 'dark';
+}
+
+const CandleStickChart: React.FC<CandleStickChartProps> = ({
+  data,
+  symbol,
+  width = 800,
+  height = 500,
+  theme = 'dark'
+}) => {
+  // ... component implementation (same as before)
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    if (!chartContainerRef.current || !data.length) return;
+
+    if (chartRef.current) {
+      chartRef.current.remove();
+    }
+
+    try {
+      const chart = createChart(chartContainerRef.current, {
+        width: width,
+        height: height,
+        layout: {
+          background: { 
+            type: ColorType.Solid, 
+            color: theme === 'dark' ? '#1e1e1e' : '#ffffff' 
+          },
+          textColor: theme === 'dark' ? '#d1d4dc' : '#191919',
+        },
+        grid: {
+          vertLines: { color: theme === 'dark' ? '#2b2b43' : '#e1e3e6' },
+          horzLines: { color: theme === 'dark' ? '#2b2b43' : '#e1e3e6' },
+        },
+        rightPriceScale: {
+          borderColor: theme === 'dark' ? '#485c7c' : '#d6dcde',
+        },
+        timeScale: {
+          borderColor: theme === 'dark' ? '#485c7c' : '#d6dcde',
+          timeVisible: true,
+          secondsVisible: false,
+        },
+      });
+
+      chartRef.current = chart;
+
+      const candlestickSeries = chart.addSeries(CandlestickSeries, {
+        upColor: '#26a69a',
+        downColor: '#ef5350',
+        borderVisible: false,
+        wickUpColor: '#26a69a',
+        wickDownColor: '#ef5350',
+      });
+
+      chart.priceScale('right').applyOptions({
+        scaleMargins: {
+          top: 0.1,
+          bottom: data.some(item => item.volume) ? 0.4 : 0.1,
+        },
+      });
+
+      const candleData = data.map(item => ({
+        time: item.time,
+        open: item.open,
+        high: item.high,
+        low: item.low,
+        close: item.close,
+      }));
+
+      candlestickSeries.setData(candleData);
+
+      const hasVolume = data.some(item => item.volume !== undefined);
+      if (hasVolume) {
+        const volumeSeries = chart.addSeries(HistogramSeries, {
+          color: '#26a69a',
+          priceFormat: { type: 'volume' },
+          priceScaleId: '',
+        });
+
+        chart.priceScale('').applyOptions({
+          scaleMargins: { top: 0.7, bottom: 0 },
+        });
+
+        const volumeData = data
+          .filter(item => item.volume !== undefined)
+          .map(item => ({
+            time: item.time,
+            value: item.volume!,
+            color: item.close > item.open ? '#26a69a80' : '#ef535080',
+          }));
+
+        volumeSeries.setData(volumeData);
+      }
+
+      chart.timeScale().fitContent();
+      setIsLoading(false);
+
+    } catch (error) {
+      console.error('Error creating chart:', error);
+      setIsLoading(false);
+    }
+
+  }, [data, width, height, theme]);
+
+  if (isLoading) {
+    return (
+      <div style={{
+        width: `${width}px`,
+        height: `${height}px`,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: theme === 'dark' ? '#1e1e1e' : '#ffffff',
+        color: theme === 'dark' ? '#d1d4dc' : '#191919',
+        border: `1px solid ${theme === 'dark' ? '#2b2b43' : '#e1e3e6'}`,
+        borderRadius: '8px'
+      }}>
+        Loading {symbol} chart...
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      border: `1px solid ${theme === 'dark' ? '#2b2b43' : '#e1e3e6'}`,
+      borderRadius: '8px',
+      overflow: 'hidden',
+      background: theme === 'dark' ? '#1e1e1e' : '#ffffff',
+    }}>
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '16px',
+        borderBottom: `1px solid ${theme === 'dark' ? '#2b2b43' : '#e1e3e6'}`,
+        background: theme === 'dark' ? '#2d2d2d' : '#f8f9fa',
+      }}>
+        <h3 style={{
+          margin: 0,
+          fontSize: '18px',
+          fontWeight: 600,
+          color: theme === 'dark' ? '#d1d4dc' : '#191919',
+        }}>
+          {symbol}
+        </h3>
+      </div>
+      
+      <div 
+        ref={chartContainerRef}
+        style={{ 
+          position: 'relative',
+          width: `${width}px`, 
+          height: `${height}px`,
+        }}
+      />
+    </div>
+  );
+};
+
+// ✅ CRITICAL: This must be a default export
+export default CandleStickChart;
